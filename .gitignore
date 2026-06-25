@@ -1,0 +1,5 @@
+# Byte-compiled / distribution / packaging
+__pycache__/
+*.pyc
+.env
+.venv
