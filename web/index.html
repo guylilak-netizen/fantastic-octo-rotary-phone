@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Life Simulator (Web)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Roboto, Arial; padding: 20px; max-width:900px; margin:auto }
+    .stats { display:flex; gap:12px; flex-wrap:wrap }
+    .stat { border:1px solid #ddd; padding:8px; width:140px; border-radius:6px }
+    .controls { margin-top:12px }
+    button { margin-right:8px; margin-top:6px }
+    textarea { width:100%; height:130px }
+    .history { max-height:200px; overflow:auto; border:1px solid #eee; padding:8px; background:#fafafa }
+    label { display:block; margin-top:8px }
+  </style>
+</head>
+<body>
+  <h1>Life Simulator (Web)</h1>
+  <div>
+    <label>Name: <input id="name" value="Player"></label>
+    <label>Seed (optional integer): <input id="seed" type="number"></label>
+    <label>Max years for auto-run: <input id="maxYears" type="number" value="100"></label>
+    <div class="controls">
+      <button id="new">Start New Life</button>
+      <button id="tick">Year Tick</button>
+      <button id="auto">Start Auto</button>
+      <button id="stop" disabled>Stop Auto</button>
+      <button id="random">Random Event</button>
+    </div>
+  </div>
+
+  <h2>Actions</h2>
+  <div>
+    <select id="actionSelect">
+      <option value="work">Work</option>
+      <option value="study">Study</option>
+      <option value="exercise">Exercise</option>
+      <option value="party">Party</option>
+      <option value="junk_food">Junk Food</option>
+      <option value="start_business">Start Business</option>
+      <option value="crime">Crime</option>
+      <option value="find_job">Find Job</option>
+      <option value="college">College</option>
+      <option value="meet_partner">Meet Partner</option>
+      <option value="have_child">Have Child</option>
+      <option value="divorce">Divorce</option>
+      <option value="lottery">Lottery</option>
+    </select>
+    <button id="applyAction">Apply Action</button>
+  </div>
+
+  <h2>Stats</h2>
+  <div class="stats" id="stats"></div>
+
+  <h2>Summary</h2>
+  <pre id="summary"></pre>
+
+  <h2>History</h2>
+  <div class="history" id="history"></div>
+
+<script>
+// Port of the Python Life simulator to JavaScript for a browser UI.
+class Life {
+  constructor(name='Player', seed=null) {
+    this.name = name;
+    this.age = 0;
+    this.alive = true;
+    this.happiness = 50;
+    this.health = 50;
+    this.smarts = 50;
+    this.looks = 50;
+    this.money = 1000;
+    this.married = false;
+    this.children = 0;
+    this.career = null;
+    this.history = [];
+    if (seed !== null) this._seedRandom(seed);
+  }
+
+  // simple seedable RNG (mulberry32)
+  _seedRandom(seed) {
+    seed = Number(seed) || 0;
+    this._rng = function() {
+      let t = seed += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  _rand() { return this._rng ? this._rng() : Math.random(); }
+  _randInt(a,b) { return Math.floor(this._rand()*(b-a+1))+a; }
+
+  yearTick(forcedEvent=null) {
+    if (!this.alive) return;
+    this.age += 1;
+    const event = forcedEvent || this.chooseEvent();
+    const desc = this.applyEvent(event);
+    this.randomDecay();
+    this.checkDeath();
+    this.history.push({age:this.age, event, desc});
+    return {event, desc};
+  }
+
+  chooseEvent() {
+    const events = [];
+    const push = (e,n)=>{ for(let i=0;i<n;i++) events.push(e); };
+    push('work',8); push('study',3); push('party',3); push('exercise',4);
+    push('junk_food',3); push('health_issue',2); push('lottery',1); push('start_business',1); push('crime',1);
+    if (18 <= this.age && this.age <= 26) push('college',4);
+    if (this.age >= 20 && this.career === null) push('find_job',6);
+    if (22 <= this.age && this.age <= 45) { push('meet_partner',3); push('have_child',2); }
+    if (this.married && this._rand() < 0.02) events.push('divorce');
+    return events[Math.floor(this._rand()*events.length)];
+  }
+
+  applyEvent(event) {
+    let desc = 'A quiet year passed.';
+    if (event === 'work') {
+      const income = this.career ? this._randInt(1000,10000) : this._randInt(200,2000);
+      this.money += income;
+      this.happiness += this._randInt(-3,3);
+      this.health += this._randInt(-2,1);
+      if (this.career && this._rand() < 0.05) { this.happiness += 5; this.money += 5000; }
+      desc = `Worked and earned $${income}.`;
+    } else if (event === 'find_job') {
+      const choices = ['Retail','Office','Engineer','Doctor','Artist','Entrepreneur'];
+      this.career = choices[Math.floor(this._rand()*choices.length)];
+      this.money += 500; this.happiness += 3; this.smarts += 1;
+      desc = `Found a job as ${this.career}.`;
+    } else if (event === 'college') {
+      const cost = this._randInt(5000,50000);
+      this.money -= cost; this.smarts += this._randInt(3,10); this.happiness += 2;
+      desc = `Attended college and spent $${cost}.`;
+    } else if (event === 'study') {
+      this.smarts += this._randInt(1,3); this.happiness -= 1; desc = 'Studied and improved smarts.';
+    } else if (event === 'exercise') { this.health += this._randInt(1,4); this.happiness +=1; desc='Exercised and improved health.'; }
+    else if (event === 'junk_food') { this.health -= this._randInt(1,4); this.happiness += this._randInt(0,3); desc='Ate junk food.'; }
+    else if (event === 'party') { this.happiness += this._randInt(1,8); this.health -= this._randInt(0,3); this.money -= this._randInt(0,200); desc='Partied.'; }
+    else if (event === 'health_issue') { const loss=this._randInt(5,30); this.health -= loss; this.happiness -= this._randInt(1,5); desc=`Suffered a health issue and lost ${loss} health.`; }
+    else if (event === 'lottery') { if (this._rand() < 0.01) { const win=this._randInt(50000,500000); this.money+=win; this.happiness+=10; desc=`Won the lottery: $${win}!`; } else { this.money -= 10; desc='Bought a lottery ticket and lost.'; } }
+    else if (event === 'start_business') { const success = this._rand() < 0.2; const investment = this._randInt(1000,50000); this.money -= investment; if (success) { const gain = investment * this._randInt(2,10); this.money += gain; this.happiness+=10; desc=`Started a business and it paid off: +$${gain}.`; } else { this.happiness -= 5; desc=`Started a business that failed, lost $${investment}.`; } }
+    else if (event === 'crime') { if (this._rand() < 0.3) { const fine=this._randInt(100,5000); this.money-=fine; this.happiness-=5; desc=`Got in trouble with the law and paid $${fine}.`; } else { const gain=this._randInt(100,3000); this.money+=gain; this.happiness-=10; desc=`Committed a crime and gained $${gain} (at moral cost).`; } }
+    else if (event === 'meet_partner') { if (!this.married && this._rand() < 0.5) { this.married = true; this.happiness+=10; desc='Met a partner and got married.'; } else { this.happiness +=2; desc='Met new people.'; } }
+    else if (event === 'have_child') { if (this.age >= 18 && this._rand() < 0.4) { this.children +=1; this.happiness+=8; this.money -= this._randInt(1000,20000); desc='Had a child.'; } else { desc='Childbirth didn\'t happen this year.'; } }
+    else if (event === 'divorce') { if (this.married) { this.married=false; this.happiness-=15; this.money -= this._randInt(1000,50000); desc='Divorced.'; } else { desc='No change.'; } }
+
+    // clamp
+    this.happiness = Math.max(0, Math.min(100, this.happiness));
+    this.health = Math.max(0, Math.min(100, this.health));
+    this.smarts = Math.max(0, Math.min(100, this.smarts));
+    this.looks = Math.max(0, Math.min(100, this.looks));
+    if (this.money < 0) this.money = Math.max(this.money, -1000000);
+
+    return desc;
+  }
+
+  randomDecay() {
+    if (this.age > 30) this.health -= Math.floor((this.age - 30) * 0.3);
+    this.happiness += this._randInt(-2,2);
+    this.smarts += this._randInt(0,1);
+    this.happiness = Math.max(0, Math.min(100, this.happiness));
+    this.smarts = Math.max(0, Math.min(100, this.smarts));
+  }
+
+  checkDeath() {
+    if (this.health <= 0) { this.alive = false; return; }
+    const base_death_chance = 0.001 * Math.max(0, this.age - 40);
+    const health_modifier = (100 - this.health) / 1000.0;
+    if (this._rand() < (base_death_chance + health_modifier)) this.alive = false;
+  }
+
+  summary() {
+    return `Name: ${this.name}\nAge: ${this.age} ${this.alive ? '(alive)' : '(deceased)'}\nMoney: $${this.money}\nHealth: ${this.health}\nHappiness: ${this.happiness}\nSmarts: ${this.smarts}\nLooks: ${this.looks}\nMarried: ${this.married}\nChildren: ${this.children}\nCareer: ${this.career}\n`;
+  }
+}
+
+// UI wiring
+let life = null;
+let autoInterval = null;
+
+function render() {
+  const stats = document.getElementById('stats'); stats.innerHTML = '';
+  if (!life) return;
+  const fields = ['age','money','health','happiness','smarts','looks','married','children','career'];
+  const map = {
+    age: `Age: ${life.age} ${life.alive? '(alive)':''}`,
+    money: `Money: $${life.money}`,
+    health: `Health: ${life.health}`,
+    happiness: `Happiness: ${life.happiness}`,
+    smarts: `Smarts: ${life.smarts}`,
+    looks: `Looks: ${life.looks}`,
+    married: `Married: ${life.married}`,
+    children: `Children: ${life.children}`,
+    career: `Career: ${life.career}`
+  };
+  for (const k of fields) {
+    const d = document.createElement('div'); d.className='stat'; d.textContent = map[k]; stats.appendChild(d);
+  }
+  document.getElementById('summary').textContent = life.summary();
+  const h = document.getElementById('history'); h.innerHTML='';
+  for (let i = life.history.length-1; i>=0 && i>=life.history.length-50; i--) {
+    const it = life.history[i]; const el = document.createElement('div'); el.textContent = `Age ${it.age}: ${it.desc || it.event}`; h.appendChild(el);
+  }
+}
+
+function startNewLife() {
+  const name = document.getElementById('name').value || 'Player';
+  const seedVal = document.getElementById('seed').value;
+  life = new Life(name, seedVal ? Number(seedVal) : null);
+  render();
+}
+
+function doTick(forcedEvent=null) {
+  if (!life) startNewLife();
+  if (!life.alive) return alert('Character is deceased. Start a new life.');
+  const r = life.yearTick(forcedEvent);
+  render();
+  if (!life.alive) { alert('Your character has died. Final summary in the box.'); stopAuto(); }
+}
+
+function startAuto() {
+  const max = Number(document.getElementById('maxYears').value) || 100;
+  if (!life) startNewLife();
+  document.getElementById('auto').disabled = true; document.getElementById('stop').disabled = false;
+  autoInterval = setInterval(()=>{
+    if (!life.alive || life.age >= max) { stopAuto(); return; }
+    doTick();
+  }, 150);
+}
+function stopAuto(){ if (autoInterval) clearInterval(autoInterval); autoInterval=null; document.getElementById('auto').disabled=false; document.getElementById('stop').disabled=true; }
+
+function applyAction() {
+  const act = document.getElementById('actionSelect').value; doTick(act);
+}
+
+function randomEvent() {
+  if (!life) startNewLife();
+  const ev = life.chooseEvent(); doTick(ev);
+}
+
+// wiring
+document.getElementById('new').addEventListener('click', startNewLife);
+document.getElementById('tick').addEventListener('click', ()=>doTick());
+document.getElementById('auto').addEventListener('click', startAuto);
+document.getElementById('stop').addEventListener('click', stopAuto);
+document.getElementById('applyAction').addEventListener('click', applyAction);
+document.getElementById('random').addEventListener('click', randomEvent);
+
+// auto-start a default life
+startNewLife();
+render();
+</script>
+</body>
+</html>
